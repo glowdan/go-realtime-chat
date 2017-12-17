@@ -22,9 +22,7 @@
 
         ws.addEventListener("message", function (ev) {
             var response = JSON.parse(ev.data);
-            console.log(response.data);
             var data = JSON.parse(response.data);
-            console.log(data);
             switch (data.action) {
                 case "role":
                     handleRole(data);
@@ -64,10 +62,11 @@
         }
 
         function wsInit() {
+            var username = document.getElementById("username").value;
             this.ws.send(JSON.stringify({
                 action: "init",
                 "user-agent": window.userAgent,
-                data: "{}"
+                data: "{\"username\":" + username + "}"
             }));
         }
 
@@ -82,7 +81,11 @@
             x = data.value.x;
             y = data.value.y;
             drawChess(role, x, y);
-            parse = false;
+            if ((isWhite && role == 1) || (!isWhite && role == 2)) {
+                parse = true;
+            } else {
+                parse = false;
+            }
         }
 
         function play(e) {//鼠标点击时发生
@@ -196,11 +199,17 @@
         }
     </script>
 </head>
-<body onload="drawRect()">
+<body>
+
 <div>
     <canvas width="640" id="canvas" onmousedown="play(event)" height="640">你的浏览器不支持HTML5 canvas ，请使用 google chrome 浏览器
         打开.
     </canvas>
+</div>
+<hr>
+<div>
+    Username:<input type="text" placeholder="username" id="username">
+    <input type="button" value="Start" onclick="drawRect()">
 </div>
 </body>
 </html>
