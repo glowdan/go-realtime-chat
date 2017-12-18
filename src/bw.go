@@ -10,6 +10,8 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
+type username string
+
 type ServerMsg struct {
 	Em   string `json:"em"`
 	Ec   int    `json:"ec"`
@@ -31,13 +33,26 @@ type PlayData struct {
 
 type Receiver struct {
 	ClientMsg ClientMsg
-	ws        websocket.Conn
+	ws        *websocket.Conn
+}
+
+type User struct {
+	Username username `json:"username"`
+	RoomId   string   `json:"roomid"`
+}
+
+type Room struct {
+	A username
+	B username
 }
 
 var clientMsg = make(chan Receiver)
 var clients = make(map[*websocket.Conn]bool)
+var idClients = make(map[username]*websocket.Conn)
+var clientIds = make(map[*websocket.Conn]username)
+var userRoom = make(map[username]string)
 var isBlack = true
-var currentPlayer = 1
+var rooms = make(map[string]*Room)
 
 func main() {
 
@@ -79,31 +94,31 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			delete(clients, ws)
 			break
 		}
-		res := Receiver{ClientMsg: receiver, ws: *ws}
+		res := Receiver{ClientMsg: receiver, ws: ws}
 		clientMsg <- res
 	}
 }
 
 func handleClientMsg() {
 	for {
-		middle := <-clientMsg
-		output := logic(middle.ClientMsg)
+		receiver := <-clientMsg
+		output := logic(&receiver)
 
-		actionSend(middle.ClientMsg, output, middle.ws)
+		actionSend(receiver, output)
 	}
 }
 
-func actionSend(tmp ClientMsg, output ServerMsg, ws websocket.Conn) {
-	switch tmp.Action {
+func actionSend(receiver Receiver, output ServerMsg) {
+	switch receiver.ClientMsg.Action {
 	case "init":
-		initAction(output, ws)
+		initAction(output, receiver.ws)
 	case "play":
-		playAction(output)
+		controller(receiver, output)
+		//playAction(output)
 	}
-
 }
 
-func initAction(output ServerMsg, ws websocket.Conn) {
+func initAction(output ServerMsg, ws *websocket.Conn) {
 	ws.WriteJSON(output)
 }
 func playAction(output ServerMsg) {
@@ -117,37 +132,68 @@ func playAction(output ServerMsg) {
 	}
 }
 
-func logic(data ClientMsg) ServerMsg {
-	switch data.Action {
+func controller(receiver Receiver, output ServerMsg) {
+	ws := receiver.ws
+	userid := clientIds[ws]
+	roomid := userRoom[userid]
+	curRoom := rooms[roomid]
+
+	playerAid := curRoom.A
+	playerBid := curRoom.B
+
+	playerAws := idClients[playerAid]
+	playerBws := idClients[playerBid]
+
+	playerAws.WriteJSON(output)
+	playerBws.WriteJSON(output)
+}
+
+func logic(receiver *Receiver) ServerMsg {
+	switch receiver.ClientMsg.Action {
 	case "init":
-		getRole(&data)
+		getRole(receiver)
 	case "play":
-		getPlay(&data)
+		getPlay(receiver)
 	}
 
 	tmp := ServerMsg{}
-	tmp.Data = data.Data
+	tmp.Data = receiver.ClientMsg.Data
 	tmp.Em = "ok"
 	tmp.Ec = 200
 	tmp.Time = int(time.Now().Unix())
 	return tmp
 }
 
-func getRole(data *ClientMsg) {
+func getRole(receiver *Receiver) {
+	msg := &User{}
+	json.Unmarshal([]byte(receiver.ClientMsg.Data), msg)
+	idClients[msg.Username] = receiver.ws
+	clientIds[receiver.ws] = msg.Username
+
+	curRoom, ok := rooms[msg.RoomId]
+	if ok {
+		curRoom.B = msg.Username
+	} else {
+		curRoom = &Room{A: msg.Username}
+	}
+	rooms[msg.RoomId] = curRoom
+
+	userRoom[msg.Username] = msg.RoomId
+
 	if isBlack {
-		data.Data = "{\"action\":\"role\",\"value\":1}"
+		receiver.ClientMsg.Data = "{\"action\":\"role\",\"value\":1}"
 		isBlack = false
 	} else {
-		data.Data = "{\"action\":\"role\",\"value\":0}"
+		receiver.ClientMsg.Data = "{\"action\":\"role\",\"value\":0}"
 		isBlack = true
 	}
 }
 
-func getPlay(data *ClientMsg) {
-	log.Println(data.Data)
+func getPlay(receiver *Receiver) {
+	log.Println(receiver.ClientMsg.Data)
 	playData := &PlayData{}
-	json.Unmarshal([]byte(data.Data), playData)
+	json.Unmarshal([]byte(receiver.ClientMsg.Data), playData)
 	log.Println(playData.Role)
 
-	data.Data = fmt.Sprintf("{\"action\":\"play\",\"value\":{\"x\":%d, \"y\":%d, \"role\":%d}}", playData.X, playData.Y, playData.Role)
+	receiver.ClientMsg.Data = fmt.Sprintf("{\"action\":\"play\",\"value\":{\"x\":%d, \"y\":%d, \"role\":%d}}", playData.X, playData.Y, playData.Role)
 }

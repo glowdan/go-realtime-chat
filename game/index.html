@@ -63,10 +63,11 @@
 
         function wsInit() {
             var username = document.getElementById("username").value;
+            var roomid = document.getElementById("roomid").value;
             this.ws.send(JSON.stringify({
                 action: "init",
                 "user-agent": window.userAgent,
-                data: "{\"username\":" + username + "}"
+                data: "{\"username\":\"" + username + "\",\"rommid\":\"" + roomid + "\"}"
             }));
         }
 
@@ -208,6 +209,7 @@
 </div>
 <hr>
 <div>
+    Room:<input type="text" placeholder="username" id="roomid">
     Username:<input type="text" placeholder="username" id="username">
     <input type="button" value="Start" onclick="drawRect()">
 </div>
