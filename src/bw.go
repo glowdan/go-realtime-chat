@@ -102,10 +102,17 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func handleClientMsg() {
 	for {
 		receiver := <-clientMsg
-		output := logic(&receiver)
-
+		output, err := logic(&receiver)
+		if err != nil {
+			reportError(receiver, err)
+			continue
+		}
 		actionSend(receiver, output)
 	}
+}
+func reportError(receiver Receiver, err error) {
+	receiver.ws.WriteJSON(err.Error())
+	log.Println(err.Error())
 }
 
 func actionSend(receiver Receiver, output ServerMsg) {
@@ -123,26 +130,52 @@ func initAction(output ServerMsg, ws *websocket.Conn) {
 
 func controller(receiver Receiver, output ServerMsg) {
 	ws := receiver.ws
-	userid := clientIds[ws]
-	roomid := userRoom[userid]
-	curRoom := rooms[roomid]
+	userid, ok := clientIds[ws]
+	if !ok {
+		log.Println("ws not found")
+		return;
+	}
+	roomid, ok := userRoom[userid]
+	if !ok {
+		log.Println("room not found")
+		return;
+	}
+	curRoom, ok := rooms[roomid]
+	if !ok {
+		log.Println("rooms not found")
+		return;
+	}
 
 	playerAid := curRoom.A
 	playerBid := curRoom.B
 
-	playerAws := idClients[playerAid]
-	playerBws := idClients[playerBid]
+	playerAws, ok := idClients[playerAid]
+	if !ok {
+		log.Println("id A not found")
+		return;
+	}
+	playerBws, ok := idClients[playerBid]
+	if !ok {
+		log.Println("id B not found")
+		return;
+	}
 
 	playerAws.WriteJSON(output)
 	playerBws.WriteJSON(output)
 }
 
-func logic(receiver *Receiver) ServerMsg {
+func logic(receiver *Receiver) (ServerMsg, error) {
 	switch receiver.ClientMsg.Action {
 	case "init":
-		getRole(receiver)
+		err := getRole(receiver)
+		if err != nil {
+			return ServerMsg{}, err
+		}
 	case "play":
-		getPlay(receiver)
+		err := getPlay(receiver)
+		if err != nil {
+			return ServerMsg{}, err
+		}
 	}
 
 	tmp := ServerMsg{}
@@ -150,12 +183,15 @@ func logic(receiver *Receiver) ServerMsg {
 	tmp.Em = "ok"
 	tmp.Ec = 200
 	tmp.Time = int(time.Now().Unix())
-	return tmp
+	return tmp, nil
 }
 
-func getRole(receiver *Receiver) {
+func getRole(receiver *Receiver) error {
 	msg := &User{}
-	json.Unmarshal([]byte(receiver.ClientMsg.Data), msg)
+	err := json.Unmarshal([]byte(receiver.ClientMsg.Data), msg)
+	if err != nil {
+		return err
+	}
 	idClients[msg.Username] = receiver.ws
 	clientIds[receiver.ws] = msg.Username
 
@@ -176,13 +212,18 @@ func getRole(receiver *Receiver) {
 		receiver.ClientMsg.Data = "{\"action\":\"role\",\"value\":0}"
 		isBlack = true
 	}
+	return nil
 }
 
-func getPlay(receiver *Receiver) {
+func getPlay(receiver *Receiver) error {
 	log.Println(receiver.ClientMsg.Data)
 	playData := &PlayData{}
-	json.Unmarshal([]byte(receiver.ClientMsg.Data), playData)
+	err := json.Unmarshal([]byte(receiver.ClientMsg.Data), playData)
+	if err != nil {
+		return err
+	}
 	log.Println(playData.Role)
 
 	receiver.ClientMsg.Data = fmt.Sprintf("{\"action\":\"play\",\"value\":{\"x\":%d, \"y\":%d, \"role\":%d}}", playData.X, playData.Y, playData.Role)
+	return nil
 }
